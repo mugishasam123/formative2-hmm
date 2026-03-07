@@ -1,7 +1,6 @@
 # Data loading and config for formative2-hmm
 
 from src.data_loader import (
-    discover_recordings,
     unpack_and_clean_dir,
     read_split_activity,
     estimate_hz_csv,
@@ -16,7 +15,6 @@ from src.config import (
 )
 
 __all__ = [
-    "discover_recordings",
     "unpack_and_clean_dir",
     "read_split_activity",
     "estimate_hz_csv",
