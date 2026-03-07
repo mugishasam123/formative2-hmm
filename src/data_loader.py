@@ -133,7 +133,7 @@ def _parse_name(zpath: Path) -> tuple[str, str, int]:
     return split, activity, rec_id
 
 
-def unpack_and_clean_dir(raw_dir: str | Path, out_dir: str | Path) -> None:
+def process_raw_archives(raw_dir: str | Path, out_dir: str | Path) -> None:
     """Process every *.zip directly in raw_dir (flat, no subfolders) and write cleaned CSVs.
 
     raw_dir  — flat folder containing archives named set1_<Activity>_*.zip
@@ -166,14 +166,14 @@ def unpack_and_clean_dir(raw_dir: str | Path, out_dir: str | Path) -> None:
         m.to_csv(out_dir / f"{zpath.stem}_cleaned.csv", index=False)
 
 
-def read_split_activity(csv_path: str | Path) -> tuple[str, str]:
+def get_activity_label_and_split(csv_path: str | Path) -> tuple[str, str]:
     """Return (split, activity) from the first row of a cleaned CSV."""
     csv_path = Path(csv_path)
     s = pd.read_csv(csv_path, usecols=["split", "activity"], nrows=1)
     return str(s.loc[0, "split"]), str(s.loc[0, "activity"])
 
 
-def estimate_hz_csv(csv_path: str | Path) -> float:
+def get_sampling_rate(csv_path: str | Path) -> float:
     """Estimate sampling rate (Hz) from a cleaned CSV (median Δt)."""
     s = pd.read_csv(csv_path, usecols=["time_s"])
     t = s["time_s"].to_numpy()
@@ -184,7 +184,7 @@ def estimate_hz_csv(csv_path: str | Path) -> float:
     return float(1.0 / pd.Series(dt).median()) if len(dt) else float("nan")
 
 
-def duration_seconds_csv(csv_path: str | Path) -> float:
+def get_duration_seconds(csv_path: str | Path) -> float:
     """Duration (seconds) from first to last timestamp in a cleaned CSV."""
     s = pd.read_csv(csv_path, usecols=["time_s"])
     if s.empty:
