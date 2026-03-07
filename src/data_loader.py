@@ -1,12 +1,15 @@
-# data_loader.py — load ZIPs from activity folders, clean and write CSVs.
+# data_loader.py — ingest flat ZIP archives with set1/set2 naming and produce cleaned CSVs.
 from pathlib import Path
 import io, re, zipfile
 import numpy as np
 import pandas as pd
-from src.config import TARGET_HZ, EDGE_TRIM_SEC, MERGE_TOL_SEC, RANDOM_SEED, TRAIN_RATIO
+from src.config import TARGET_HZ, EDGE_TRIM_SEC, MERGE_TOL_SEC
 
-# Filenames like: walking3.zip, standing12.zip  (rec id parsed from number)
-REC_ID_RE = re.compile(r"(\d+)\.zip$", re.IGNORECASE)
+# Flat filename format: set1_Jumping_2026-03-05_18-40-03.zip
+#   set prefix → ignored (set1 = train dir, set2 = test dir)
+#   second segment → activity label (capitalised in name, stored lowercase)
+#   remainder → original recording identifier
+NAME_RE = re.compile(r"^set\d+_([A-Za-z]+)_", re.IGNORECASE)
 
 
 def _read_sensor(zp: zipfile.ZipFile, keywords: list[str]) -> pd.DataFrame | None:
@@ -114,30 +117,37 @@ def _trim(df: pd.DataFrame, sec: float = EDGE_TRIM_SEC) -> pd.DataFrame:
     return df[(df["time_s"] >= t0) & (df["time_s"] <= t1)].reset_index(drop=True)
 
 
-def _parse_name(zpath: Path):
-    """Extract (split, activity, rec_id) from a path like data/walking/walking3.zip."""
-    activity = zpath.parent.name.lower()
-    m = REC_ID_RE.search(zpath.name)
-    if not m: raise ValueError(f"Bad filename: {zpath.name}")
-    rec_id = int(m.group(1))
-    h = hash((activity, rec_id, RANDOM_SEED)) & 0x7FFFFFFF
-    split = "train" if (h / 0x7FFFFFFF) < TRAIN_RATIO else "test"
+def _parse_name(zpath: Path) -> tuple[str, str, int]:
+    """Parse (split, activity, rec_id) from a flat archive like set1_Jumping_2026-03-05.zip.
+
+    split   → determined by the parent folder ('train' or 'test')
+    activity → the second underscore-delimited segment, lowercased
+    rec_id   → stable integer derived from the file stem hash
+    """
+    m = NAME_RE.match(zpath.name)
+    if not m:
+        raise ValueError(f"Unrecognised filename format: {zpath.name}")
+    split    = zpath.parent.name.lower()           # folder is 'train' or 'test'
+    activity = m.group(1).lower()                  # e.g. 'jumping', 'still'
+    rec_id   = hash(zpath.stem) & 0x0FFFFFFF       # stable per-file positive int
     return split, activity, rec_id
 
 
 def unpack_and_clean_dir(raw_dir: str | Path, out_dir: str | Path) -> None:
-    """Read each ZIP under raw_dir/<activity>/ and write a *_cleaned.csv to out_dir."""
-    raw_dir, out_dir = Path(raw_dir), Path(out_dir)
-    (out_dir / "train").mkdir(parents=True, exist_ok=True)
-    (out_dir / "test").mkdir(parents=True, exist_ok=True)
+    """Process every *.zip directly in raw_dir (flat, no subfolders) and write cleaned CSVs.
 
-    for zpath in sorted(raw_dir.glob("*/*.zip")):
+    raw_dir  — flat folder containing archives named set1_<Activity>_*.zip
+    out_dir  — destination folder; created if absent
+    """
+    raw_dir, out_dir = Path(raw_dir), Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for zpath in sorted(raw_dir.glob("*.zip")):        # flat — single-level glob
         split, activity, rec_id = _parse_name(zpath)
         with zipfile.ZipFile(zpath, "r") as zp:
             acc = _read_sensor(zp, ["acc", "accelerometer"])
             gyr = _read_sensor(zp, ["gyro", "gyroscope"])
 
-        # resample if needed
         if acc is not None:
             hz = _estimate_hz(acc["time_s"].to_numpy())
             if np.isfinite(hz) and abs(hz - TARGET_HZ) > 1.0:
@@ -153,7 +163,7 @@ def unpack_and_clean_dir(raw_dir: str | Path, out_dir: str | Path) -> None:
         m["split"]        = split
         m["recording_id"] = rec_id
 
-        m.to_csv(out_dir / split / f"{zpath.stem}_cleaned.csv", index=False)
+        m.to_csv(out_dir / f"{zpath.stem}_cleaned.csv", index=False)
 
 
 def read_split_activity(csv_path: str | Path) -> tuple[str, str]:
